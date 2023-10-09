@@ -9,7 +9,6 @@ import (
 	"os"
 	"encoding/json"
 	"strconv"
-	"io"
 	"time"
 	"net"
 )
