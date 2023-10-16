@@ -44,7 +44,7 @@ func fetchData(client *loggly.ClientType) {
 	request.SetBasicAuth(apiUsername, apiPassword)
 
 	//Set the time of the timeout
-	timeout := 2 * time.Second
+	timeout := 5 * time.Second
 
 	// Make a GET request to the API
 	http_client := http.Client{
@@ -135,8 +135,6 @@ func fetchData(client *loggly.ClientType) {
 	response_size := float64(response.ContentLength)/1024.0
 	client.Send("info","Succesfull API request. Response size="+strconv.FormatFloat(response_size, 'f', 2, 64)+"KB")
 	fmt.Println("There are ",len(responseData.AircraftList)," aircrafts flying over Lake Ontario and surroundings")
-	fmt.Println(responseData.Time)
-	//fmt.Println(responseData.AircraftList[0])
 }
 
 func main() {
