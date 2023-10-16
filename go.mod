@@ -1,6 +1,6 @@
 module main_opensky.go
 
-go 1.21.1
+go 1.21
 
 require github.com/jamespearly/loggly v0.0.0-20220929110912-1d839b0715fa
 
