@@ -133,7 +133,7 @@ func fetchData(client *loggly.ClientType) {
 	        }
 	}
 	response_size := float64(response.ContentLength)/1024.0
-	client.Send("info","Succesfull API request. Response size="+strconv.FormatFloat(response_size, 'f', 2, 64)+"KB")
+	client.Send("info","Succesfull API request. Response size="+strconv.FormatFloat(response_size, 'f', 5, 64)+"KB")
 	fmt.Println("There are ",len(responseData.AircraftList)," aircrafts flying over Lake Ontario and surroundings")
 }
 
