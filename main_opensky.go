@@ -23,7 +23,6 @@ type ResponseData struct {
 }
 
 type AircraftState struct {
-	Time	      int     `json:"time"`
 	Icao24        string  `json:"icao24"`
 	Callsign      string  `json:"callsign"`
 	OriginCountry string  `json:"origin_country"`
@@ -37,9 +36,10 @@ type AircraftState struct {
 	GeoAltitude   float64 `json:"geo_altitude"`
 }
 
-type StoreType struct {
-	Time int `json:"time`
-	AircraftList []AircraftState `json:"aircraft_state_list"`
+
+type StoreType struct{
+	AircraftList string `json"aircraft_state_list"`
+	Time int
 }
 
 
@@ -77,11 +77,11 @@ func convertAircraftList(original ResponseData) StoreType {
 			})
 		}
 	}
-
-	result.AircraftList = list
-
+	jsonData, _ := json.Marshal(list)
+	result.AircraftList = string(jsonData)
 	return result
 }
+
 
 func fetchData(client *loggly.ClientType) StoreType {
 
@@ -126,7 +126,7 @@ func fetchData(client *loggly.ClientType) StoreType {
 		return StoreType{}
 	}
 	// Check the HTTP status code
-        if response.StatusCode != http.StatusOK {
+        if response!=nil && response.StatusCode != http.StatusOK {
                 if response.StatusCode == http.StatusBadGateway {
                         // Handle 502 Bad Gateway error
                         client.EchoSend("error","API returned a 502 Bad Gateway error.")
@@ -151,11 +151,11 @@ func fetchData(client *loggly.ClientType) StoreType {
 	// Ask 4 more times for the states of the aircrafts if the states were empty
 	// Error in the API sent sometimes empty JSON as if there were no flying aircrafts
 	if responseData.AircraftList== nil{
-		client.Send("warning","API error, no aircraft states received: attempt " + strconv.Itoa(1))
+		client.EchoSend("warning","API error, no aircraft states received")
 		for attempt := 1; attempt<5; attempt++{
 			response, err := http_client.Do(request)
 			// Check the HTTP status code
-			if response.StatusCode != http.StatusOK {
+			if response!=nil && response.StatusCode != http.StatusOK {
 			        if response.StatusCode == http.StatusBadGateway {
 			                // Handle 502 Bad Gateway error
 	        		        client.EchoSend("error","API returned a 502 Bad Gateway error.")
@@ -175,8 +175,6 @@ func fetchData(client *loggly.ClientType) StoreType {
                			 }
                			 return StoreType{}
        			 }
-		        defer response.Body.Close()
-
 			// Decode JSON
 			decoder := json.NewDecoder(response.Body)
 		        err = decoder.Decode(&responseData)
@@ -185,21 +183,45 @@ func fetchData(client *loggly.ClientType) StoreType {
 		                client.EchoSend("error", "Error decoding JSON")
 		                return StoreType{}
 		        }
-
 			// Check again if the list is empty
 			if responseData.AircraftList== nil{
-	                client.Send("warning","API error, no aircraft states received: attempt " + strconv.Itoa(attempt+1))
-			}
-			if attempt == 4 {
-				client.EchoSend("error","5 failed attempts to fetch aircraft data, maybe there are not aircrafts at this time")
-				return StoreType{}
+	                	client.EchoSend("warning","API error, no aircraft states received: attempt")
+				if attempt == 4 {
+					client.EchoSend("error","5 failed attempts to fetch aircraft data, maybe there are not aircrafts at this time")
+					return StoreType{}
+				}
 			}
 	        }
 	}
 	response_size := float64(response.ContentLength)/1024.0
-	client.Send("info","Succesfull API request. Response size="+strconv.FormatFloat(response_size, 'f', 5, 64)+"KB")
+	client.EchoSend("info","Succesfull API request. Response size="+strconv.FormatFloat(response_size, 'f', 5, 64)+"KB")
 	fmt.Println("There are ",len(responseData.AircraftList)," aircrafts flying over Lake Ontario and surroundings")
 	return convertAircraftList(responseData)
+}
+
+func store_in_dynamo(client *loggly.ClientType, data StoreType, svc *dynamodb.DynamoDB){
+	if data.Time!=0{
+                        tableName := "bhidalgo_Aircraft_States"
+
+                        av, err := dynamodbattribute.MarshalMap(data)
+                        if err != nil {
+                                client.EchoSend("error","Got error marshalling item")
+                                return
+                        }
+
+                        input := &dynamodb.PutItemInput{
+                                Item:      av,
+                                TableName: aws.String(tableName),
+                        }
+
+                        _, err = svc.PutItem(input)
+                        if err != nil {
+                                client.EchoSend("error","Error putting item in the table")
+				fmt.Printf("%+v\n", data)
+                                fmt.Println(err)
+                                return
+                        }
+                }
 }
 
 func main() {
@@ -217,37 +239,42 @@ func main() {
 	svc := dynamodb.New(sess)
 	client.Send("info","Conected to AWS")
 
-	fmt.Println("Accede http:/localhost:8080/main_opensky  to fetch the number of aircrafts flying over Lake Ontario and surroundings.\n")
-	http.HandleFunc("/main_opensky", func(w http.ResponseWriter, r *http.Request) {
-		data := fetchData(client)
-		http.ServeFile(w, r, "index.html")
+	data := fetchData(client)
+	fmt.Println(data.Time)
+	if data.Time!=0{
+                        store_in_dynamo(client, data, svc)
+        }
 
-		if data.Time!=0{
-			fmt.Fprint(w, "Data fetched successfully!")
-			tableName := "bhidalgo_Aircraft_States"
+	ticker := time.NewTicker(20 * time.Second)
 
-			av, err := dynamodbattribute.MarshalMap(data)
-			if err != nil {
-				client.EchoSend("error","Got error marshalling item")
-				return
-			}
-
-			input := &dynamodb.PutItemInput{
-	        		Item:      av,
-	       			TableName: aws.String(tableName),
-	   		}
-
-	    		_, err = svc.PutItem(input)
-	    		if err != nil {
-	        		client.EchoSend("error","Error putting item in the table")
-	    			fmt.Println(err)
-				return
+	// Run a goroutine to execute your function on each tick
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				data := fetchData(client)
+				if data.Time!=0{
+			        	store_in_dynamo(client, data, svc)
+			        }
 			}
 		}
-	})
+	}()
 
-	port := 80
-	fmt.Printf("Server is running on :%d\n", port)
-	http.ListenAndServe(fmt.Sprintf(":%d", port), nil)
+	go func(){
+		fmt.Println("Accede http:/localhost:8080/main_opensky  to fetch the number of aircrafts flying over Lake Ontario and surroundings.\n")
+	        http.HandleFunc("/main_opensky", func(w http.ResponseWriter, r *http.Request) {
+	                data := fetchData(client)
+	                http.ServeFile(w, r, "index.html")
+	                if data.Time!=0{
+	                        store_in_dynamo(client, data, svc)
+	                }
+	        })
+
+	        port := 80
+	        fmt.Printf("Server is running on :%d\n", port)
+	        http.ListenAndServe(fmt.Sprintf(":%d", port), nil)
+	}()
+
+	select {}
 
 }
