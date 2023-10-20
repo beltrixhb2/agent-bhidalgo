@@ -3,6 +3,3 @@
 # Ignore .env files
 .env
 
-# Ignore .aws files
-
-.aws

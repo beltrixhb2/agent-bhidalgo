@@ -5,7 +5,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
    	"github.com/aws/aws-sdk-go/aws/session"
    	"github.com/aws/aws-sdk-go/service/dynamodb"
-//   	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
+   	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
 	"fmt"
 	loggly "github.com/jamespearly/loggly"
 	"net/http"
@@ -37,12 +37,19 @@ type AircraftState struct {
 	GeoAltitude   float64 `json:"geo_altitude"`
 }
 
-func convertAircraftList(original ResponseData) []AircraftState {
-	var result []AircraftState
+type StoreType struct {
+	Time int `json:"time`
+	AircraftList []AircraftState `json:"aircraft_state_list"`
+}
+
+
+func convertAircraftList(original ResponseData) StoreType {
+	var result StoreType
+	result.Time = original.Time
+	var list []AircraftState
 
 	for _, state := range original.AircraftList {
 		if len(state) >= 17 {
-			time := original.Time
 			icao24, _ := state[0].(string)
 			callsign, _ := state[1].(string)
 			originCountry, _ := state[2].(string)
@@ -55,8 +62,7 @@ func convertAircraftList(original ResponseData) []AircraftState {
 			verticalRate, _ := state[11].(float64)
 			geoAltitude, _ := state[13].(float64)
 
-			result = append(result, AircraftState{
-				Time:	       time,
+			list = append(list, AircraftState{
 				Icao24:        icao24,
 				Callsign:      callsign,
 				OriginCountry: originCountry,
@@ -72,10 +78,12 @@ func convertAircraftList(original ResponseData) []AircraftState {
 		}
 	}
 
+	result.AircraftList = list
+
 	return result
 }
 
-func fetchData(client *loggly.ClientType) []AircraftState {
+func fetchData(client *loggly.ClientType) StoreType {
 
 	apiURL := "https://opensky-network.org/api/states/all?lamax=44&lomin=-80&lomax=-75&lamin=43"
 
@@ -83,7 +91,7 @@ func fetchData(client *loggly.ClientType) []AircraftState {
 	request, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
 		client.EchoSend("error","Error creating request")
-		return []AircraftState{}
+		return StoreType{}
 	}
 
 	// Read API credentials from environment variables
@@ -93,7 +101,7 @@ func fetchData(client *loggly.ClientType) []AircraftState {
 	// Check if credentials are available
 	if apiUsername == "" || apiPassword == "" {
 		client.EchoSend("error","API credentials not set. Please set API_USERNAME and API_PASSWORD environment variables.")
-		return []AircraftState{}
+		return StoreType{}
 	}
 
 	// Set the Authorization header for basic authentication
@@ -115,18 +123,18 @@ func fetchData(client *loggly.ClientType) []AircraftState {
 		} else {
 			client.EchoSend("error","Error in the API request")
 		}
-		return []AircraftState{}
+		return StoreType{}
 	}
 	// Check the HTTP status code
         if response.StatusCode != http.StatusOK {
                 if response.StatusCode == http.StatusBadGateway {
                         // Handle 502 Bad Gateway error
                         client.EchoSend("error","API returned a 502 Bad Gateway error.")
-                        return []AircraftState{}
+                        return StoreType{}
                 } else {
                         // Handle other HTTP status codes
                         client.EchoSend("error","API returned an unexpected status code:")
-                        return []AircraftState{}
+                        return StoreType{}
                 }
         }
 
@@ -137,7 +145,7 @@ func fetchData(client *loggly.ClientType) []AircraftState {
 	if err != nil {
 		fmt.Println(err)
 		client.EchoSend("error", "Error decoding JSON")
-		return []AircraftState{}
+		return StoreType{}
 	}
 
 	// Ask 4 more times for the states of the aircrafts if the states were empty
@@ -151,11 +159,11 @@ func fetchData(client *loggly.ClientType) []AircraftState {
 			        if response.StatusCode == http.StatusBadGateway {
 			                // Handle 502 Bad Gateway error
 	        		        client.EchoSend("error","API returned a 502 Bad Gateway error.")
-					return []AircraftState{}
+					return StoreType{}
 	      			} else {
 	      			        // Handle other HTTP status codes
 	      			        client.EchoSend("error","API returned an unexpected status code:")
-					return []AircraftState{}
+					return StoreType{}
 	     			}
 			}
 			// Check request errors
@@ -165,7 +173,7 @@ func fetchData(client *loggly.ClientType) []AircraftState {
                			 } else {
                        			 client.EchoSend("error","Error in the API request")
                			 }
-               			 return []AircraftState{}
+               			 return StoreType{}
        			 }
 		        defer response.Body.Close()
 
@@ -175,7 +183,7 @@ func fetchData(client *loggly.ClientType) []AircraftState {
 		        if err != nil {
 		                fmt.Println(err)
 		                client.EchoSend("error", "Error decoding JSON")
-		                return   []AircraftState{}
+		                return StoreType{}
 		        }
 
 			// Check again if the list is empty
@@ -184,7 +192,7 @@ func fetchData(client *loggly.ClientType) []AircraftState {
 			}
 			if attempt == 4 {
 				client.EchoSend("error","5 failed attempts to fetch aircraft data, maybe there are not aircrafts at this time")
-				return []AircraftState{}
+				return StoreType{}
 			}
 	        }
 	}
@@ -212,20 +220,30 @@ func main() {
 	fmt.Println("Accede http:/localhost:8080/main_opensky  to fetch the number of aircrafts flying over Lake Ontario and surroundings.\n")
 	http.HandleFunc("/main_opensky", func(w http.ResponseWriter, r *http.Request) {
 		data := fetchData(client)
-		fmt.Printf("%+v\n", data)
 		http.ServeFile(w, r, "index.html")
 
-		fmt.Fprint(w, "Data fetched successfully!")
-		tableName := "bhidalgo_Aircraft_States"
-		input := &dynamodb.PutItemInput{
-        		Item:      data[0],
-       			TableName: aws.String(tableName),
-   		}
+		if data.Time!=0{
+			fmt.Fprint(w, "Data fetched successfully!")
+			tableName := "bhidalgo_Aircraft_States"
 
-    		_, err := svc.PutItem(input)
-    		if err != nil {
-        		client.EchoSend("error","Error putting item in the table")
-    		}
+			av, err := dynamodbattribute.MarshalMap(data)
+			if err != nil {
+				client.EchoSend("error","Got error marshalling item")
+				return
+			}
+
+			input := &dynamodb.PutItemInput{
+	        		Item:      av,
+	       			TableName: aws.String(tableName),
+	   		}
+
+	    		_, err = svc.PutItem(input)
+	    		if err != nil {
+	        		client.EchoSend("error","Error putting item in the table")
+	    			fmt.Println(err)
+				return
+			}
+		}
 	})
 
 	port := 80
