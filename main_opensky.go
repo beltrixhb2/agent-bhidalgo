@@ -1,5 +1,5 @@
 
-package main
+package main_opensky
 
 import (
 	"github.com/aws/aws-sdk-go/aws"

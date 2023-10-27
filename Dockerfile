@@ -1,10 +1,16 @@
-FROM golang:1.21.1
+FROM golang:latest AS build
 
 WORKDIR /app
 
 COPY . .
 
-RUN go build -o main_opensky .
+RUN CGO_ENABLED=0 GOOS=linux go build -o main_opensky .
+
+FROM alpine:latest
+
+COPY --from=build /app/main_opensky .
+
+RUN chmod +x main_opensky
 
 EXPOSE 80
 
