@@ -1,5 +1,4 @@
-
-package main_opensky
+package main
 
 import (
 	"github.com/aws/aws-sdk-go/aws"
@@ -38,7 +37,7 @@ type AircraftState struct {
 
 
 type StoreType struct{
-	AircraftList string `json"aircraft_state_list"`
+    AircraftList string `json:"aircraft_state_list"`
 	Time int
 }
 
@@ -240,12 +239,11 @@ func main() {
 	client.Send("info","Conected to AWS")
 
 	data := fetchData(client)
-	fmt.Println(data.Time)
 	if data.Time!=0{
-                        store_in_dynamo(client, data, svc)
+            store_in_dynamo(client, data, svc)
         }
 
-	ticker := time.NewTicker(20 * time.Second)
+	ticker := time.NewTicker(2 * time.Minute)
 
 	// Run a goroutine to execute your function on each tick
 	go func() {
@@ -259,22 +257,6 @@ func main() {
 			}
 		}
 	}()
-
-	go func(){
-		fmt.Println("Accede http:/localhost:8080/main_opensky  to fetch the number of aircrafts flying over Lake Ontario and surroundings.\n")
-	        http.HandleFunc("/main_opensky", func(w http.ResponseWriter, r *http.Request) {
-	                data := fetchData(client)
-	                http.ServeFile(w, r, "index.html")
-	                if data.Time!=0{
-	                        store_in_dynamo(client, data, svc)
-	                }
-	        })
-
-	        port := 80
-	        fmt.Printf("Server is running on :%d\n", port)
-	        http.ListenAndServe(fmt.Sprintf(":%d", port), nil)
-	}()
-
-	select {}
-
+    
+    select{}
 }

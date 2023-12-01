@@ -1,17 +1,21 @@
-FROM golang:latest AS build
+FROM public.ecr.aws/docker/library/golang:latest AS build 
 
-WORKDIR /app
+WORKDIR /build
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux go build -o main_opensky .
+RUN go mod tidy
 
-FROM alpine:latest
+RUN CGO_ENABLED=0 GOARCH=amd64 GOOS=linux go build -o main_opensky .
 
-COPY --from=build /app/main_opensky .
+FROM public.ecr.aws/docker/library/alpine:latest
+
+WORKDIR /app  
+
+COPY --from=build /build/main_opensky .
 
 RUN chmod +x main_opensky
 
-EXPOSE 80
+RUN pwd && find .
 
 CMD ["./main_opensky"]
